@@ -40,3 +40,21 @@ pub fn get_next_sqrt_price_buy_sol(
     let delta = ((usdc_amount as u128) << 64) / liquidity;
     sqrt_price.checked_add(delta).ok_or(ClmmError::MathOverflow)
 }
+
+///If I spent some USDC and the price moved from √P_old to √P_new,
+/// how much SOL did I actually receive?
+/// Calculate SOL output when buying with USDC
+/// ΔSOL = L × (√P_new - √P_old)
+pub fn get_sol_output(
+    liquidity: u128,
+    sqrt_price_old: u128,
+    sqrt_price_new: u128,
+) -> Result<u64, ClmmError> {
+    let diff = sqrt_price_new
+        .checked_sub(sqrt_price_old)
+        .ok_or(ClmmError::MathOverflow)?;
+
+    let sol_raw = (liquidity * diff) >> 64; // as it is in Q64, we need to convert back into normal number
+
+    Ok(sol_raw as u64)
+}
