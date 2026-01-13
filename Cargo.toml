@@ -1,0 +1,17 @@
+[package]
+name = "mini-clmm"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+borsh = { version = "1.6.0", features = ["derive"] }
+bytemuck = { version = "1.24.0", features = ["derive"] }
+solana-account-info = "3.1.0"
+solana-msg = "3.0.0"
+solana-program-entrypoint = "3.1.1"
+solana-program-error = "3.0.0"
+solana-pubkey = "4.0.0"
+thiserror = "2.0.17"
