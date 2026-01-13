@@ -1,4 +1,5 @@
 pub mod error;
+pub mod math;
 
 use solana_program_entrypoint::entrypoint;
 use solana_account_info::AccountInfo;
