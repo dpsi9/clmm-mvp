@@ -1,3 +1,5 @@
+pub mod error;
+
 use solana_program_entrypoint::entrypoint;
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
