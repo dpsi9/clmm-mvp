@@ -5,6 +5,8 @@ pub const MAX_TICK: i32 = 100;
 
 pub const Q64: u128 = 1 << 64;
 
+/// Here liquidity = If price moves by this much, how many tokens does that represent
+
 /// price = 1.0001 ^ (tick / 2)
 pub fn get_sqrt_price_at_tick(tick: i32) -> Result<u128, ClmmError> {
     if tick < MIN_TICK || tick > MAX_TICK {
