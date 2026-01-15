@@ -1,3 +1,4 @@
+pub mod processor;
 pub mod state;
 pub mod error;
 pub mod math;
@@ -8,6 +9,7 @@ use solana_program_error::ProgramResult;
 use solana_pubkey::Pubkey;
 use solana_msg::msg;
 
+
 entrypoint!(process_instruction);
 
 pub fn process_instruction(
@@ -16,5 +18,5 @@ pub fn process_instruction(
     instruction_data: &[u8]
 ) -> ProgramResult{
     msg!("CLMM MVP: Processing instruction");
-    //ToDo
+   crate::processor::process(program_id, accounts, instruction_data)
 }

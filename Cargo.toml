@@ -13,5 +13,5 @@ solana-account-info = "3.1.0"
 solana-msg = "3.0.0"
 solana-program-entrypoint = "3.1.1"
 solana-program-error = "3.0.0"
-solana-pubkey = "4.0.0"
+solana-pubkey = {version = "4.0.0", features = ["borsh"]}
 thiserror = "2.0.17"
