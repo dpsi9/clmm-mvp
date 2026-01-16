@@ -11,6 +11,12 @@ pub enum ClmmError {
 
     #[error("Math overflow")]
     MathOverflow,
+
+    #[error("Position not found")]
+    PositionNotFound
+
+    #[error("Insufficient liquidity")]
+    InsufficientLiquidity
 }
 
 impl From<ClmmError> for ProgramError {

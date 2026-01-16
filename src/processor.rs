@@ -5,7 +5,11 @@ use solana_program_entrypoint::ProgramResult;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
-use crate::{error::ClmmError, math::get_sqrt_price_at_tick, state::Pool};
+use crate::{
+    error::ClmmError,
+    math::{self, get_sqrt_price_at_tick},
+    state::Pool,
+};
 
 #[derive(BorshDeserialize, BorshSerialize, Debug, Clone)]
 pub enum ClmmInstruction {
@@ -181,9 +185,108 @@ fn add_liquidity(
 }
 
 fn buy_sol(accounts: &[AccountInfo], usdc_amount: u64) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+
+    let user = next_account_info(accounts_iter)?;
+    let pool_account = next_account_info(accounts_iter)?;
+
+    if !pool_account.is_writable {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let pool_data = pool_account.data.borrow();
+    let mut pool =
+        Pool::try_from_slice(&pool_data).map_err(|_| ProgramError::InvalidAccountData)?;
+
+    if pool.liquidity == 0 {
+        msg!("Pool has no liquidity");
+        return Err(ClmmError::PoolNotInitialized.into());
+    }
+
+    let new_sqrt_price =
+        math::get_next_sqrt_price_buy_sol(pool.sqrt_price, pool.liquidity, usdc_amount)
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+    let sol_output = math::get_sol_output(pool.liquidity, pool.sqrt_price, new_sqrt_price)
+        .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+    pool.sqrt_price = new_sqrt_price;
+
+    // Update tick if crossed
+    let new_tick = ((new_sqrt_price >> 64) - (1 << 64)) / 3277;
+    pool.update_tick_if_crossed(new_tick as i32);
+
+    msg!(
+        "User {} bought {} SOL with {} USDC",
+        user.key,
+        sol_output,
+        usdc_amount
+    );
+
+    // Save pool
+    let mut pool_data_mut = pool_account.data.borrow_mut();
+    pool.serialize(&mut &mut pool_data_mut[..])
+        .map_err(|_| ProgramError::BorshIoError)?;
+
     Ok(())
 }
 
 fn remove_liquidity(accounts: &[AccountInfo], liquidity: u128) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+
+    let user = next_account_info(accounts_iter)?;
+    let pool_account = next_account_info(accounts_iter)?;
+
+    if !pool_account.is_writable {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let pool_data = &mut &pool_account.data.borrow();
+    let mut pool =
+        Pool::try_from_slice(&pool_data).map_err(|_| ProgramError::InvalidAccountData)?;
+
+    let position = pool
+        .get_position_mut(user.key)
+        .ok_or(ClmmError::PositionNotFound)?;
+
+    if position.liquidity < liquidity {
+        return Err(ClmmError::InsufficientLiquidity.into());
+    }
+
+    let usdc_return = (liquidity / 1000) as u64;
+    let sol_return = (liquidity / 2000) as u64;
+
+    // Update position and capture tick values before releasing mutable borrow
+    position.liquidity -= liquidity;
+    let tick_lower = position.tick_lower;
+    let tick_upper = position.tick_upper;
+    let position_liquidity = position.liquidity;
+
+    // Update pool liquidity if active
+    if tick_lower <= pool.tick_current && pool.tick_current < tick_upper {
+        pool.liquidity -= liquidity;
+    }
+
+    // Update ticks
+    let lower_idx = (tick_lower + 100) as usize;
+    let upper_idx = (tick_upper + 100) as usize;
+    pool.ticks[lower_idx] -= liquidity as i128;
+    pool.ticks[upper_idx] += liquidity as i128;
+
+    // Remove if empty
+    if position_liquidity == 0 {
+        pool.remove_position(user.key).map_err(|e| {
+            msg!("Error removing position: {}", e);
+            ProgramError::InvalidInstructionData
+        })?;
+    }
+
+    msg!("Returns: {} USDC, {} SOL", usdc_return, sol_return);
+
+    // Save pool
+    let mut pool_data_mut = pool_account.data.borrow_mut();
+    pool.serialize(&mut &mut pool_data_mut[..])
+        .map_err(|_| ProgramError::BorshIoError)?;
+
     Ok(())
 }
