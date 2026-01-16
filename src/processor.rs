@@ -77,7 +77,7 @@ pub fn process(
 }
 
 fn initialize_pool(
-    program_id: &Pubkey,
+    _program_id: &Pubkey,
     accounts: &[AccountInfo],
     token_0_mint: Pubkey,
     token_1_mint: Pubkey,
@@ -166,7 +166,7 @@ fn add_liquidity(
 
     let usdc_needed = pool
         .add_liquidity(*user.key, tick_lower, tick_upper, liquidity)
-        .map_err(|e| {
+        .map_err(|_| {
             msg!("Failed to add liquidity: {}", liquidity);
             ProgramError::InvalidInstructionData
         })?;

@@ -13,7 +13,7 @@ pub enum ClmmError {
     MathOverflow,
 
     #[error("Position not found")]
-    PositionNotFound
+    PositionNotFound,
 
     #[error("Insufficient liquidity")]
     InsufficientLiquidity
