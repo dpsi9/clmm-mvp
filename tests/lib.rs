@@ -1,4 +1,3 @@
-use borsh::{BorshDeserialize, BorshSerialize};
 use bytemuck;
 use litesvm::LiteSVM;
 
@@ -15,26 +14,7 @@ use helpers::*;
 
 const PROGRAM_ID: Pubkey = pubkey!("FmBWcVKgRj8RqdQx1MZ3g6arqJtx8q1UDqSGSiKPy9oV");
 
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
-pub enum ClmmInstruction {
-    InitializePool {
-        token_0_mint: Pubkey,
-        token_1_mint: Pubkey,
-        token_0_vault: Pubkey,
-        token_1_vault: Pubkey,
-    },
-    AddLiquidity {
-        tick_lower: i32,
-        tick_upper: i32,
-        usdc_amount: u64,
-    },
-    BuySol {
-        usdc_amount: u64,
-    },
-    RemoveLiquidity {
-        liquidity: u128,
-    },
-}
+use mini_clmm::processor::ClmmInstruction;
 
 fn setup_clmm() -> (
     LiteSVM,
