@@ -21,16 +21,19 @@ Educational implementation of Uniswap v3-style concentrated liquidity on Solana.
 | `RemoveLiquidity` | Remove liquidity from a position |
 | `BuySol` | Swap USDC for SOL |
 
-## Build
+## Quick Start
 
 ```bash
+# Clone and build
+git clone https://github.com/dpsi9/clmm-mvp
+cd mini-clmm
 cargo build-sbf
-```
 
-## Test
-
-```bash
+# Run tests
 cargo test
+
+# Deploy (requires local validator)
+solana program deploy target/deploy/mini_clmm.so
 ```
 
 ## Architecture
