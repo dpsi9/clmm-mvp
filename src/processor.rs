@@ -93,7 +93,15 @@ fn initialize_pool(
         return Err(ProgramError::InvalidAccountData);
     }
 
-    let pool = Pool::new(
+    if pool_account.data_len() < Pool::LEN {
+        return Err(ProgramError::AccountDataTooSmall);
+    }
+
+    // Zero-copy: directly modify account data without stack allocation
+    let mut data = pool_account.data.borrow_mut();
+    let pool = bytemuck::from_bytes_mut::<Pool>(&mut data[..Pool::LEN]);
+
+    pool.initialize(
         token_0_mint,
         token_1_mint,
         token_0_vault,
@@ -101,13 +109,6 @@ fn initialize_pool(
         *payer.key,
     );
 
-    // let pool_data = pool.try_to_vec
-    if pool_account.data_len() < Pool::LEN {
-        return Err(ProgramError::AccountDataTooSmall);
-    }
-
-    pool.serialize(&mut &mut pool_account.data.borrow_mut()[..])
-        .map_err(|_| ProgramError::BorshIoError)?;
     Ok(())
 }
 
@@ -122,11 +123,17 @@ fn add_liquidity(
     let user = next_account_info(accounts_iter)?;
     let pool_account = next_account_info(accounts_iter)?;
 
-    let pool_data = pool_account.data.borrow();
-    let mut pool = Pool::try_from_slice(&pool_data).map_err(|e| {
-        msg!("Failed to deserialize pool: {:?}", e);
-        ProgramError::InvalidAccountData
-    })?;
+    if !pool_account.is_writable {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if pool_account.data_len() < Pool::LEN {
+        return Err(ProgramError::AccountDataTooSmall);
+    }
+
+    // Zero-copy access
+    let mut data = pool_account.data.borrow_mut();
+    let pool = bytemuck::from_bytes_mut::<Pool>(&mut data[..Pool::LEN]);
 
     if tick_lower >= tick_upper || tick_lower < -100 || tick_upper > 100 {
         return Err(ClmmError::InvalidTickRange.into());
@@ -148,15 +155,32 @@ fn add_liquidity(
     })?;
 
     // L = amount_0 * √lower * √upper / (√upper - √lower)
-    let numerator = (usdc_amount as u128)
+    // Note: sqrt values are in Q64 format (fixed-point with 64 fractional bits)
+    // sqrt_lower and sqrt_upper are both around 2^64, so their product would overflow
+    // We need to divide before multiplying to avoid overflow
+    // Simplified approach: L ≈ amount * sqrt_price^2 / diff
+    // Since sqrt_price ≈ 2^64 and diff is small, we simplify to:
+    // L = amount * (sqrt_lower / diff) * sqrt_upper / 2^64
+    
+    // First: amount * sqrt_lower (fits in u128 since amount is u64 and sqrt_lower is ~2^64)
+    let step1 = (usdc_amount as u128)
         .checked_mul(sqrt_lower)
-        .and_then(|x| x.checked_mul(sqrt_upper))
         .ok_or_else(|| {
-            msg!("Math overflow: numerator calculation");
+            msg!("Math overflow: step1");
             ClmmError::MathOverflow
         })?;
-
-    let liquidity = numerator / diff;
+    
+    // Divide by diff to get a reasonable intermediate value
+    let step2 = step1 / diff;
+    
+    // Multiply by sqrt_upper and divide by Q64 to get final liquidity
+    // step2 * sqrt_upper could overflow, so we do: (step2 / 2^32) * (sqrt_upper / 2^32)
+    let liquidity = (step2 >> 32)
+        .checked_mul(sqrt_upper >> 32)
+        .ok_or_else(|| {
+            msg!("Math overflow: liquidity calculation");
+            ClmmError::MathOverflow
+        })?;
 
     msg!(
         "Calculated liquidity: {} from {} USDC",
@@ -166,8 +190,8 @@ fn add_liquidity(
 
     let usdc_needed = pool
         .add_liquidity(*user.key, tick_lower, tick_upper, liquidity)
-        .map_err(|_| {
-            msg!("Failed to add liquidity: {}", liquidity);
+        .map_err(|e| {
+            msg!("Failed to add liquidity: {}", e);
             ProgramError::InvalidInstructionData
         })?;
 
@@ -177,9 +201,6 @@ fn add_liquidity(
         usdc_needed,
         usdc_amount
     );
-
-    pool.serialize(&mut &mut pool_account.data.borrow_mut()[..])
-        .map_err(|_| ProgramError::BorshIoError)?;
 
     Ok(())
 }
@@ -194,9 +215,13 @@ fn buy_sol(accounts: &[AccountInfo], usdc_amount: u64) -> ProgramResult {
         return Err(ProgramError::InvalidAccountData);
     }
 
-    let pool_data = pool_account.data.borrow();
-    let mut pool =
-        Pool::try_from_slice(&pool_data).map_err(|_| ProgramError::InvalidAccountData)?;
+    if pool_account.data_len() < Pool::LEN {
+        return Err(ProgramError::AccountDataTooSmall);
+    }
+
+    // Zero-copy access
+    let mut data = pool_account.data.borrow_mut();
+    let pool = bytemuck::from_bytes_mut::<Pool>(&mut data[..Pool::LEN]);
 
     if pool.liquidity == 0 {
         msg!("Pool has no liquidity");
@@ -213,8 +238,18 @@ fn buy_sol(accounts: &[AccountInfo], usdc_amount: u64) -> ProgramResult {
     pool.sqrt_price = new_sqrt_price;
 
     // Update tick if crossed
-    let new_tick = ((new_sqrt_price >> 64) - (1 << 64)) / 3277;
-    pool.update_tick_if_crossed(new_tick as i32);
+    // new_tick = (sqrt_price - Q64) / 3277, clamped to valid range
+    let sqrt_q64 = 1u128 << 64;
+    let new_tick = if new_sqrt_price >= sqrt_q64 {
+        let diff = new_sqrt_price - sqrt_q64;
+        (diff / 3277) as i32
+    } else {
+        let diff = sqrt_q64 - new_sqrt_price;
+        -((diff / 3277) as i32)
+    };
+    // Clamp to valid tick range
+    let new_tick = new_tick.max(-100).min(100);
+    pool.update_tick_if_crossed(new_tick);
 
     msg!(
         "User {} bought {} SOL with {} USDC",
@@ -222,11 +257,6 @@ fn buy_sol(accounts: &[AccountInfo], usdc_amount: u64) -> ProgramResult {
         sol_output,
         usdc_amount
     );
-
-    // Save pool
-    let mut pool_data_mut = pool_account.data.borrow_mut();
-    pool.serialize(&mut &mut pool_data_mut[..])
-        .map_err(|_| ProgramError::BorshIoError)?;
 
     Ok(())
 }
@@ -241,9 +271,13 @@ fn remove_liquidity(accounts: &[AccountInfo], liquidity: u128) -> ProgramResult 
         return Err(ProgramError::InvalidAccountData);
     }
 
-    let pool_data = &mut &pool_account.data.borrow();
-    let mut pool =
-        Pool::try_from_slice(&pool_data).map_err(|_| ProgramError::InvalidAccountData)?;
+    if pool_account.data_len() < Pool::LEN {
+        return Err(ProgramError::AccountDataTooSmall);
+    }
+
+    // Zero-copy access
+    let mut data = pool_account.data.borrow_mut();
+    let pool = bytemuck::from_bytes_mut::<Pool>(&mut data[..Pool::LEN]);
 
     let position = pool
         .get_position_mut(user.key)
@@ -282,11 +316,6 @@ fn remove_liquidity(accounts: &[AccountInfo], liquidity: u128) -> ProgramResult 
     }
 
     msg!("Returns: {} USDC, {} SOL", usdc_return, sol_return);
-
-    // Save pool
-    let mut pool_data_mut = pool_account.data.borrow_mut();
-    pool.serialize(&mut &mut pool_data_mut[..])
-        .map_err(|_| ProgramError::BorshIoError)?;
 
     Ok(())
 }

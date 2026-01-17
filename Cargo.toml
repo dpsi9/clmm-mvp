@@ -13,15 +13,19 @@ solana-account-info = "3.1.0"
 solana-msg = "3.0.0"
 solana-program-entrypoint = "3.1.1"
 solana-program-error = "3.0.0"
+solana-program-pack = "3.0.0"
 solana-pubkey = {version = "4.0.0", features = ["borsh"]}
 thiserror = "2.0.17"
 
 [dev-dependencies]
+bytemuck = { version = "1.24.0", features = ["derive"] }
 litesvm = "0.8.2"
 litesvm-token = "0.8.2"
 solana-account = "3.0.0"
 solana-instruction = "3.0.0"
 solana-keypair = "3.0.0"
 solana-signer = "3.0.0"
+solana-system-interface = { version = "3.0.0", features = ["bincode"] }
 solana-transaction = "3.0.0"
 spl-token = "7"
+spl-token-interface = "2.0.0"
